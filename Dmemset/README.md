@@ -2,7 +2,7 @@
 
 This is part of my [Google Summer of Code project](https://summerofcode.withgoogle.com/organizations/6103365956665344/#5475582328963072), _Independency of D from the C Standard Library_.
 
-It is a public repository for the work on the `memmove()/memcpy()` replacement.
+It is a public repository for the work on the `memset()` replacement.
 
 ## Compile and Run
 
@@ -12,12 +12,12 @@ only DMD and LDC).
 `rdmd run tests|benchmarks ldc|dmd`
 
 ### Run the test suite
-With the option `tests`. This suites verifies that `Dmemmove` works correctly.
+With the option `tests`. This suites verifies that `Dmemset` works correctly.
 
 Refer to the `run.d` file for more info and `tests.d` to see the test suite code.
 
 ### Run the benchmark suite
-With the option `benchmarks`. This suite benchmarks `Dmemmove` against `memmove()/memcpy()` of the C Standard Library.
+With the option `benchmarks`. This suite benchmarks `Dmemset` against `memset()` of the C Standard Library.
 
 Refer to the `run.d` file for more info and `benchmarks.d` to see the benchmark suite code.
 

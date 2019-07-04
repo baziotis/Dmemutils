@@ -47,10 +47,12 @@ void main(string[] args)
     testStaticType!(double)(5);
     testStaticType!(real)(5);
     testDynamicArray!(ubyte)(5, 3);
+    /*
     static foreach(i; 1..33) {
         testDynamicArray!(ubyte)(5, i);
         testStaticArray!(ubyte, i)(5);
     }
+    */
     testDynamicArray!(ubyte)(5, 32);
     testStaticArray!(ubyte, 32)(5);
     testDynamicArray!(ubyte)(5, 100);

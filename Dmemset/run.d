@@ -10,9 +10,9 @@ import std.getopt;
 void main(string[] args)
 {
     auto help = getopt(args);
-    if (help.helpWanted || args.length != 3 || (args[1] != "tests" && args[1] != "benchmarks") || (args[2] != "ldc" && args[2] != "dmd"))
+    if (help.helpWanted || args.length != 3 || (args[1] != "tests" && args[1] != "benchmarks") || (args[2] != "ldc" && args[2] != "dmd" && args[2] != "gdc"))
     {
-        writeln("USAGE: rdmd run tests|benchmarks ldc|dmd");
+        writeln("USAGE: rdmd run tests|benchmarks ldc|dmd|gdc");
         return;
     }
 
@@ -32,6 +32,10 @@ void main(string[] args)
     {
         compile = "rdmd -O -inline -I../ --build-only";
     }
+    else
+    {
+        compile = "gdc -O3";
+    }
 
     if (model == 32)
     {
@@ -46,14 +50,26 @@ void main(string[] args)
     {
         compile ~= " tests.d Dmemset.d";
         execute = "./tests";
+        if (args[2] == "gdc")
+        {
+            compile ~= " -o tests";
+        }
     }
     else
     {
         compile ~= " benchmarks.d Dmemset.d";
+        if (args[2] == "gdc")
+        {
+            compile ~= " -o benchmarks";
+        }
         execute = "./benchmarks";
     }
 
-    compile ~= " ../noc/simd.d";
+    if (args[2] != "gdc")
+    {
+        compile ~= " ../noc/simd.d";
+    }
+
     if(run(compile) != 0)
     {
         return;

@@ -24,13 +24,24 @@
    DEALINGS IN THE SOFTWARE.
 */
 
-import noc.simd: broadcast_int, store16i_sse, store32i_sse;
-import core.simd: int4;
-
-extern(C) void Dmemset(void *d, const uint val, size_t n)
+version (GNU)
 {
-    const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
 
+void Dmemset(void *d, const uint val, size_t n)
+{
+    Dmemset_naive(d, cast(const(ubyte))val, n);
+}
+
+}
+else
+{
+
+// NOTE(stefanos): I could not a GDC respective of the intrinsics.
+void Dmemset(void *d, const uint val, size_t n)
+{
+    import noc.simd: broadcast_int, store16i_sse, store32i_sse;
+    import core.simd: int4;
+    const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
     // NOTE(stefanos): I use the naive version, which in my benchmarks was slower
     // than the previous classic switch. BUT. Using the switch had a significant
     // drop in the rest of the sizes. It's not the branch that is responsible for the drop,
@@ -41,11 +52,9 @@ extern(C) void Dmemset(void *d, const uint val, size_t n)
         return;
     }
     void *temp = d + n - 0x10;                  // Used for the last 32 bytes
-
     int4 xmm0;
     // Broadcast v to all bytes.
     broadcast_int(xmm0, v);
-
     ubyte rem = cast(ulong)d & 15;              // Remainder from the previous 16-byte boundary.
     // Store 16 bytes, from which some will possibly overlap on a future store.
     // For example, if the `rem` is 7, we want to store 16 - 7 = 9 bytes unaligned,
@@ -54,7 +63,6 @@ extern(C) void Dmemset(void *d, const uint val, size_t n)
     store16i_sse(d, xmm0);
     d += 16 - rem;
     n -= 16 - rem;
-
     // Move in blocks of 32.
     // TODO(stefanos): Experiment with differnt sizes.
     if (n >= 32)
@@ -78,17 +86,20 @@ extern(C) void Dmemset(void *d, const uint val, size_t n)
             // `d` and `n` in the above loop and going backwards. It was slower in my benchs.
             d += 32;
             n -= 32;
-        } while(n >= 32);
+        } while (n >= 32);
     }
     // Compensate for the last (at most) 32 bytes.
     store32i_sse(temp-0x10, xmm0);
 }
 
-extern(C) void Dmemset_naive(ubyte *dst, const ubyte val, size_t n)
+}
+
+void Dmemset_naive(void *dst, const ubyte val, size_t n)
 {
+    ubyte *d = cast(ubyte*)dst;
     for (size_t i = 0; i != n; ++i)
     {
-        dst[i] = val;
+        d[i] = val;
     }
 }
 

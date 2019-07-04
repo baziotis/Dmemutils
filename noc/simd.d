@@ -17,7 +17,7 @@ version (DigitalMars)
 }
 else
 {
-    static assert(0, "Version not supported");
+    static assert(0, "Only DMD / LDC are supported");
 }
 
 // TODO(stefanos): Is there a way to make them @safe?

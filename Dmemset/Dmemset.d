@@ -27,71 +27,73 @@
 version (GNU)
 {
 
-void Dmemset(void *d, const uint val, size_t n)
-{
-    Dmemset_naive(d, cast(const(ubyte))val, n);
-}
+    void Dmemset(void *d, const uint val, size_t n)
+    {
+        Dmemset_naive(d, cast(const(ubyte))val, n);
+    }
 
 }
 else
 {
 
-// NOTE(stefanos): I could not a GDC respective of the intrinsics.
-void Dmemset(void *d, const uint val, size_t n)
-{
-    import noc.simd: broadcast_int, store16i_sse, store32i_sse;
-    import core.simd: int4;
-    const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
-    // NOTE(stefanos): I use the naive version, which in my benchmarks was slower
-    // than the previous classic switch. BUT. Using the switch had a significant
-    // drop in the rest of the sizes. It's not the branch that is responsible for the drop,
-    // but the fact that it's more difficult to optimize it as part of the rest of the code.
-    if (n <= 16)
+    version (D_SIMD)
     {
-        Dmemset_naive(cast(ubyte*)d, cast(ubyte)val, n);
-        return;
-    }
-    void *temp = d + n - 0x10;                  // Used for the last 32 bytes
-    int4 xmm0;
-    // Broadcast v to all bytes.
-    broadcast_int(xmm0, v);
-    ubyte rem = cast(ulong)d & 15;              // Remainder from the previous 16-byte boundary.
-    // Store 16 bytes, from which some will possibly overlap on a future store.
-    // For example, if the `rem` is 7, we want to store 16 - 7 = 9 bytes unaligned,
-    // add 16 - 7 = 9 to `d` and start storing aligned. Since 16 - `rem` can be at most
-    // 16, we store 16 bytes anyway.
-    store16i_sse(d, xmm0);
-    d += 16 - rem;
-    n -= 16 - rem;
-    // Move in blocks of 32.
-    // TODO(stefanos): Experiment with differnt sizes.
-    if (n >= 32)
-    {
-        // Align to (previous) multiple of 32. That does something invisible to the code,
-        // but a good optimizer will avoid a `cmp` instruction inside the loop. With a
-        // multiple of 32, the end of the loop can be (if we assume that `n` is in RDX):
-        // sub RDX, 32;
-        // jge START_OF_THE_LOOP.
-        // Without that, it has to be:
-        // sub RDX, 32;
-        // cmp RDX, 32;
-        // jge START_OF_THE_LOOP
-        // NOTE, that we align on a _previous_ multiple (for 37, we will go to 32). That means
-        // we have somehow to compensate for that, which is done at the end of this function.
-        n &= -32;
-        do
+        // NOTE(stefanos): I could not a GDC respective of the intrinsics.
+        void Dmemset(void *d, const uint val, size_t n)
         {
-            store32i_sse(d, xmm0);
-            // NOTE(stefanos): I tried avoiding this operation on `d` by combining
-            // `d` and `n` in the above loop and going backwards. It was slower in my benchs.
-            d += 32;
-            n -= 32;
-        } while (n >= 32);
+            import noc.simd: broadcast_int, store16i_sse, store32i_sse;
+            import core.simd: int4;
+            const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
+            // NOTE(stefanos): I use the naive version, which in my benchmarks was slower
+            // than the previous classic switch. BUT. Using the switch had a significant
+            // drop in the rest of the sizes. It's not the branch that is responsible for the drop,
+            // but the fact that it's more difficult to optimize it as part of the rest of the code.
+            if (n <= 16)
+            {
+                Dmemset_naive(cast(ubyte*)d, cast(ubyte)val, n);
+                return;
+            }
+            void *temp = d + n - 0x10;                  // Used for the last 32 bytes
+            int4 xmm0;
+            // Broadcast v to all bytes.
+            broadcast_int(xmm0, v);
+            ubyte rem = cast(ulong)d & 15;              // Remainder from the previous 16-byte boundary.
+            // Store 16 bytes, from which some will possibly overlap on a future store.
+            // For example, if the `rem` is 7, we want to store 16 - 7 = 9 bytes unaligned,
+            // add 16 - 7 = 9 to `d` and start storing aligned. Since 16 - `rem` can be at most
+            // 16, we store 16 bytes anyway.
+            store16i_sse(d, xmm0);
+            d += 16 - rem;
+            n -= 16 - rem;
+            // Move in blocks of 32.
+            // TODO(stefanos): Experiment with differnt sizes.
+            if (n >= 32)
+            {
+                // Align to (previous) multiple of 32. That does something invisible to the code,
+                // but a good optimizer will avoid a `cmp` instruction inside the loop. With a
+                // multiple of 32, the end of the loop can be (if we assume that `n` is in RDX):
+                // sub RDX, 32;
+                // jge START_OF_THE_LOOP.
+                // Without that, it has to be:
+                // sub RDX, 32;
+                // cmp RDX, 32;
+                // jge START_OF_THE_LOOP
+                // NOTE, that we align on a _previous_ multiple (for 37, we will go to 32). That means
+                // we have somehow to compensate for that, which is done at the end of this function.
+                n &= -32;
+                do
+                {
+                    store32i_sse(d, xmm0);
+                    // NOTE(stefanos): I tried avoiding this operation on `d` by combining
+                    // `d` and `n` in the above loop and going backwards. It was slower in my benchs.
+                    d += 32;
+                    n -= 32;
+                } while (n >= 32);
+            }
+            // Compensate for the last (at most) 32 bytes.
+            store32i_sse(temp-0x10, xmm0);
+        }
     }
-    // Compensate for the last (at most) 32 bytes.
-    store32i_sse(temp-0x10, xmm0);
-}
-
 }
 
 void Dmemset_naive(void *dst, const ubyte val, size_t n)
@@ -107,13 +109,12 @@ void Dmemset_naive(void *dst, const ubyte val, size_t n)
 // Range-checking is not needed since we never
 // pass an `n` (byte count) ourselves.
 
-import std.traits;
-import std.stdio;
+import std.traits: isArray;
 
 void Dmemset(T)(ref T dst, const ubyte val)
 {
     const uint v = cast(int)val;
-    version (X86_64)
+    version (D_SIMD)
     {
         static if (isArray!T)
         {

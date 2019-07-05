@@ -41,7 +41,7 @@ else
         // NOTE(stefanos): I could not a GDC respective of the intrinsics.
         void Dmemset(void *d, const uint val, size_t n)
         {
-            import noc.simd: broadcast_int, store16i_sse, store32i_sse;
+            import noc.simd: store16i_sse, store32i_sse;
             import core.simd: int4;
             const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
             // NOTE(stefanos): I use the naive version, which in my benchmarks was slower
@@ -54,10 +54,9 @@ else
                 return;
             }
             void *temp = d + n - 0x10;                  // Used for the last 32 bytes
-            int4 xmm0;
             // Broadcast v to all bytes.
-            broadcast_int(xmm0, v);
-            ubyte rem = cast(ulong)d & 15;              // Remainder from the previous 16-byte boundary.
+            int4 xmm0 = int4(v);
+            ubyte rem = cast(ubyte)d & 15;              // Remainder from the previous 16-byte boundary.
             // Store 16 bytes, from which some will possibly overlap on a future store.
             // For example, if the `rem` is 7, we want to store 16 - 7 = 9 bytes unaligned,
             // add 16 - 7 = 9 to `d` and start storing aligned. Since 16 - `rem` can be at most

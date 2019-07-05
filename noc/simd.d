@@ -54,6 +54,7 @@ void store16i_sse(void *dest, int4 reg)
 
 // TODO(stefanos): Can we broadcast an int in a float4? That would be useful
 // because then we would use only the float versions.
+/* Use xmm = int4(v) instead.
 void broadcast_int(ref int4 xmm, int v)
 {
     xmm[0] = v;
@@ -61,6 +62,7 @@ void broadcast_int(ref int4 xmm, int v)
     xmm[2] = v;
     xmm[3] = v;
 }
+*/
 
 /// FLOAT ///
 

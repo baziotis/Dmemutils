@@ -35,12 +35,30 @@ import std.traits;
 // with the `ubyte` type. That is for simpler code as the target here
 // is to test speed. You can refer to tests.d for correctness testing.
 
+static string genTests()
+{
+    string res;
+    import std.conv : text;
+    foreach(i; 1..256)
+    {
+        res ~= "test!("~text(i)~")(5);";
+    }
+    return res;
+}
+
 void main(string[] args)
 {
     writeln("size(bytes) Cmemmove(GB/s) Dmemmove(GB/s)");
-    static foreach(i; 1..256)
+    version (GNU)
     {
-        test!(i)(5);
+        mixin(genTests());
+    }
+    else
+    {
+        foreach(i; 1..256)
+        {
+            test!(i)(5);
+        }
     }
     test!(500)(5);
     test!(700)(5);

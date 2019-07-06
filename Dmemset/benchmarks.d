@@ -55,7 +55,7 @@ void main(string[] args)
     }
     else
     {
-        foreach(i; 1..256)
+        static foreach(i; 1..256)
         {
             test!(i)(5);
         }

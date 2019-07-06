@@ -49,17 +49,7 @@ static string genTests()
 void main(string[] args)
 {
     writeln("size(bytes) Cmemmove(GB/s) Dmemmove(GB/s)");
-    version (GNU)
-    {
-        mixin(genTests());
-    }
-    else
-    {
-        static foreach(i; 1..256)
-        {
-            test!(i)(5);
-        }
-    }
+    mixin(genTests());
     test!(500)(5);
     test!(700)(5);
     test!(3434)(5);

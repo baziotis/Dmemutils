@@ -30,7 +30,7 @@ void main(string[] args)
     }
     else if (args[2] == "dmd")
     {
-        compile = "rdmd -O -inline -I../";
+        compile = "rdmd -O -inline"; 
     }
     else
     {
@@ -68,11 +68,6 @@ void main(string[] args)
             compile ~= " -o benchmarks";
         }
         execute = "./benchmarks";
-    }
-
-    if (args[2] != "gdc")
-    {
-        compile ~= " ../noc/simd.d";
     }
 
     if(run(compile) != 0)

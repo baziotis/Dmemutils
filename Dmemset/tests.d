@@ -32,6 +32,21 @@ struct S(size_t Size)
     ubyte[Size] x;
 }
 
+static string genTests()
+{
+    string res;
+    import std.conv : text;
+    // NOTE(stefanos): static foreach would be ideal here but GDC doesn't support it.
+    // I could not avoid GDC trying (and failing) to compile the static foreach
+    // even with versioning.
+    foreach(i; 1..33)
+    {
+        res ~= "testDynamicArray!(ubyte)(5, "~text(i)~");
+                testStaticArray!(ubyte, "~text(i)~")(5);";
+    }
+    return res;
+}
+
 void main(string[] args)
 {
     testStaticArray!(ubyte, 32)(5);
@@ -47,10 +62,7 @@ void main(string[] args)
     testStaticType!(double)(5);
     testStaticType!(real)(5);
     testDynamicArray!(ubyte)(5, 3);
-    static foreach(i; 1..33) {
-        testDynamicArray!(ubyte)(5, i);
-        testStaticArray!(ubyte, i)(5);
-    }
+    mixin(genTests());
     testDynamicArray!(ubyte)(5, 32);
     testStaticArray!(ubyte, 32)(5);
     testDynamicArray!(ubyte)(5, 100);

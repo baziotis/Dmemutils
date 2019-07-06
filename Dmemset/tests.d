@@ -34,7 +34,7 @@ struct S(size_t Size)
 
 void main(string[] args)
 {
-
+    testStaticArray!(ubyte, 32)(5);
     testStaticType!(byte)(5);
     testStaticType!(ubyte)(5);
     testStaticType!(short)(5);
@@ -47,12 +47,10 @@ void main(string[] args)
     testStaticType!(double)(5);
     testStaticType!(real)(5);
     testDynamicArray!(ubyte)(5, 3);
-    /*
     static foreach(i; 1..33) {
         testDynamicArray!(ubyte)(5, i);
         testStaticArray!(ubyte, i)(5);
     }
-    */
     testDynamicArray!(ubyte)(5, 32);
     testStaticArray!(ubyte, 32)(5);
     testDynamicArray!(ubyte)(5, 100);
@@ -83,20 +81,6 @@ void main(string[] args)
     testStaticType!(S!2000)(5);
 }
 
-// From a very good Chandler Carruth video on benchmarking: https://www.youtube.com/watch?v=nXaxk27zwlk
-void escape(void* p)
-{
-    version(LDC)
-    {
-        import ldc.llvmasm;
-        __asm("", "r,~{memory}", p);
-    }
-    version(GNU)
-    {
-        asm { "" : : "g" p : "memory"; }
-    }
-}
-
 void verifyArray(T)(int j, const ref T[] a, const ubyte v)
 {
     const ubyte *p = cast(const ubyte *) a.ptr;
@@ -115,6 +99,10 @@ void verifyStaticType(T)(const ref T t, const ubyte v)
     }
 }
 
+// NOTE(stefanos): Escaping the pointers is not needed, the compiler doesn't optimize it away.
+// My best guess is that this is because of the verification (i.e. if the operation is not done,
+// an assert will fire and does not satisfy correctness).
+
 void testDynamicArray(T)(const ubyte v, size_t n)
 {
     writeln("Test dynamic array (type, size): (", T.stringof, ", ", n, ")");
@@ -128,7 +116,6 @@ void testDynamicArray(T)(const ubyte v, size_t n)
     {
         auto d = buf[i..i+n];
 
-        escape(d.ptr);
         Dmemset(d, v);
         verifyArray(i, d, v);
     }
@@ -146,7 +133,6 @@ void testStaticArray(T, size_t n)(const ubyte v)
     {
         auto d = buf[i..i+n];
 
-        escape(d.ptr);
         Dmemset(d, v);
         verifyArray(i, d, v);
     }
@@ -155,7 +141,6 @@ void testStaticArray(T, size_t n)(const ubyte v)
 void testStaticType(T)(const ubyte v) {
     writeln("Test static type: ", T.stringof);
     T t;
-    escape(&t);
     Dmemset(t, v);
     verifyStaticType(t, v);
 }

@@ -30,7 +30,7 @@ void main(string[] args)
     }
     else if (args[2] == "dmd")
     {
-        compile = "rdmd -O -inline -I../ --build-only";
+        compile = "rdmd -O -inline -I../";
     }
     else
     {
@@ -44,6 +44,11 @@ void main(string[] args)
     else
     {
         compile ~= " -m64";
+    }
+
+    if (args[2] == "dmd")
+    {
+        compile ~= " --build-only";
     }
 
     if (args[1] == "tests")

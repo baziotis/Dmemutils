@@ -31,6 +31,21 @@ import std.stdio;
 import core.stdc.string;
 import std.traits;
 
+static string genTests()
+{
+    import std.conv : text;
+    string res;
+    foreach (i; 1..100)
+    {
+        res ~=
+        "
+        testStaticType!(S!"~text(i)~");
+        testStaticArray!("~text(i)~")();
+        ";
+    }
+    return res;
+}
+
 void main(string[] args)
 {
     stdout.flush();
@@ -44,14 +59,10 @@ void main(string[] args)
     testStaticType!(ulong);
     testStaticType!(float);
     testStaticType!(double);
-    // TODO - IMPORTANT(stefanos): This fails for reasons I don't know.
+    // TODO - IMPORTANT(stefanos): This fails for reasons I don't know, on LDC.
     // Note that `real` is supposed to be 80 bits = 10 bytes, but T.sizeof outputs 16 bytes
     //testStaticType!(real);
-    static foreach (i; 1..100)
-    {
-        testStaticType!(S!i);
-        testStaticArray!(i)();
-    }
+    mixin(genTests());
     testStaticType!(S!3452);
     testStaticArray!(3452)();
     testStaticType!(S!6598);
@@ -90,7 +101,7 @@ void escape(void* p)
 }
 
 pragma(inline, false)
-void initStatic(T, int pick)(T *v)
+void initStatic(T)(T *v)
 {
     static if (is(T == float))
     {
@@ -130,8 +141,8 @@ void testStaticType(T)()
 {
     T d, s;
     writeln("Static Type: ", T.stringof);
-    initStatic!(T, 0)(&d);
-    initStatic!(T, 1)(&s);
+    initStatic!(T)(&d);
+    initStatic!(T)(&s);
     Dmemmove(&d, &s);
     verifyStaticType(&d, &s);
 }

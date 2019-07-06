@@ -32,14 +32,22 @@ import std.stdio;
 import core.stdc.string;
 import std.traits;
 
+static string genTests()
+{
+    import std.conv : text;
+    string res;
+    foreach (i; 1..100)
+    {
+        res ~= "test!("~text(i)~");\n";
+    }
+    return res;
+}
+
 void main(string[] args)
 {
     // For performing benchmarks
     writeln("size(bytes) Cmemmove(GB/s) Dmemmove(GB/s)");
-    static foreach(i; 1..20)
-    {
-        test!(i);
-    }
+    mixin(genTests());
     test!(500);
     test!(700);
     test!(3434);
@@ -49,7 +57,6 @@ void main(string[] args)
     test!(27897);
     test!(32344);
     test!(46830);
-
 
     test!(512);
     test!(1024);

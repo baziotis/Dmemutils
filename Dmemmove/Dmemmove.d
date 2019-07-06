@@ -21,52 +21,181 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEalINGS IN THE SOFTWARE.
 */
 
-import S_struct;
-import std.traits;
-import std.stdio;
+import std.traits : isScalarType, isIntegral;
 
+void Dmemmove(T)(T *dst, const T *src) {
+    void *d = dst;
+    const void *s = src;
+    if ((cast(ulong)d - cast(ulong)s) < T.sizeof)
+    {  // There is overlap with dest being ahead. Use backwards move.
+        Dmemmove_back(d, s, T.sizeof);
+    }
+    else if ((cast(ulong)s - cast(ulong)d) < T.sizeof)
+    {  // There is overlap with src being ahead. Use backwards move.
+        Dmemmove_forw(d, s, T.sizeof);
+    }
+    else
+    {  // There is no overlap, use memcpy.
+        Dmemcpy(dst, src);
+    }
+}
+
+void Dmemmove(T)(ref T[] dst, const ref T[] src) {
+    assert(dst.length == src.length);
+    void *d = dst.ptr;
+    const void *s = src.ptr;
+    size_t n = dst.length * T.sizeof;
+    if ((cast(ulong)d - cast(ulong)s) < n)
+    {  // There is overlap with dest being ahead. Use backwards move.
+        Dmemmove_back(d, s, n);
+    }
+    else if ((cast(ulong)s - cast(ulong)d) < n)
+    {  // There is overlap with src being ahead. Use backwards move.
+        Dmemmove_forw(d, s, n);
+    }
+    else
+    {  // There is no overlap, use memcpy.
+        pragma(inline, true);
+        Dmemcpy(d, s, n);
+    }
+}
+
+/* Handy function to test if an integer is power of 2.
+ */
 bool isPowerOf2(T)(T x)
 if (isIntegral!T)
 {
     return (x != 0) && ((x & (x - 1)) == 0);
 }
 
-void Dmemcpy(T)(T *dst, const T *src)
-if (isScalarType!T)
+/* Little SIMD library
+ */
+version (D_SIMD)
 {
-    pragma(inline, true)
-    *dst = *src;
-}
-
-// This implementation handles type sizes that are not powers of 2
-// This implementation can't be @safe because it does pointer arithmetic
-void DmemcpyUnsafe(T)(T *dst, const T *src) @trusted
-if (is(T == struct))
-{
-    import core.bitop: bsr;
-
-    static assert(T.sizeof != 0);
-    enum prevPowerOf2 = 1LU << bsr(T.sizeof);
-    alias TRemainder = S!(T.sizeof - prevPowerOf2);
-    auto s = cast(const S!prevPowerOf2*)(src);
-    auto d = cast(S!prevPowerOf2*)(dst);
-    static if (T.sizeof < 31)
+    import core.simd: float4;
+    version (LDC)
     {
-        pragma(inline, true);
-        Dmemcpy(d, s);
-        Dmemcpy(cast(TRemainder*)(d + 1), cast(const TRemainder*)(s + 1));
+        import ldc.simd: loadUnaligned, storeUnaligned;
+    }
+    else
+    version (DigitalMars)
+    {
+        import core.simd: void16, loadUnaligned, storeUnaligned;
     }
     else
     {
-        Dmemcpy(d, s);
-        Dmemcpy(cast(TRemainder*)(d + 1), cast(const TRemainder*)(s + 1));
+        static assert(0, "Only DMD / LDC are supported");
+    }
+    
+    void store16f_sse(void *dest, float4 reg)
+    {
+        version (LDC)
+        {
+            storeUnaligned!float4(reg, cast(float*)dest);
+        }
+        else
+        {
+            storeUnaligned(cast(void16*)dest, reg);
+        }
+    }
+    
+    float4 load16f_sse(const(void) *src)
+    {
+        version (LDC)
+        {
+            return loadUnaligned!(float4)(cast(const(float) *)src);
+        }
+        else
+        {
+            return loadUnaligned(cast(void16*)src);
+        }
+    }
+    
+    /*
+    void _store128fp_sse(void *d, const(void) *s)
+    {
+        _mm_prefetch!(0)(s+0x1a0);
+        _mm_prefetch!(0)(s+0x280);
+        store128f_sse(d, s);
+    }
+    */
+    
+    void lstore128f_sse(void *d, const(void) *s)
+    {
+        float4 xmm0 = load16f_sse(cast(const float*)s);
+        float4 xmm1 = load16f_sse(cast(const float*)(s+16));
+        float4 xmm2 = load16f_sse(cast(const float*)(s+32));
+        float4 xmm3 = load16f_sse(cast(const float*)(s+48));
+        float4 xmm4 = load16f_sse(cast(const float*)(s+64));
+        float4 xmm5 = load16f_sse(cast(const float*)(s+80));
+        float4 xmm6 = load16f_sse(cast(const float*)(s+96));
+        float4 xmm7 = load16f_sse(cast(const float*)(s+112));
+    
+        store16f_sse(cast(float*)d, xmm0);
+        store16f_sse(cast(float*)(d+16), xmm1);
+        store16f_sse(cast(float*)(d+32), xmm2);
+        store16f_sse(cast(float*)(d+48), xmm3);
+        store16f_sse(cast(float*)(d+64), xmm4);
+        store16f_sse(cast(float*)(d+80), xmm5);
+        store16f_sse(cast(float*)(d+96), xmm6);
+        store16f_sse(cast(float*)(d+112), xmm7);
+    }
+    
+    void lstore64f_sse(void *d, const(void) *s)
+    {
+        float4 xmm0 = load16f_sse(cast(const float*)s);
+        float4 xmm1 = load16f_sse(cast(const float*)(s+16));
+        float4 xmm2 = load16f_sse(cast(const float*)(s+32));
+        float4 xmm3 = load16f_sse(cast(const float*)(s+48));
+    
+        store16f_sse(cast(float*)d, xmm0);
+        store16f_sse(cast(float*)(d+16), xmm1);
+        store16f_sse(cast(float*)(d+32), xmm2);
+        store16f_sse(cast(float*)(d+48), xmm3);
+    }
+    
+    void lstore32f_sse(void *d, const(void) *s)
+    {
+        float4 xmm0 = load16f_sse(cast(const float*)s);
+        float4 xmm1 = load16f_sse(cast(const float*)(s+16));
+        store16f_sse(cast(float*)d, xmm0);
+        store16f_sse(cast(float*)(d+16), xmm1);
     }
 }
 
-import core.simd: float4;
-import noc.simd;
+/*
+ *
+ *
+ * memcpy() implementation
+ *
+ *
+ */
 
-// NOTE(stefanos): This function requires _no_ overlap.
+version (D_SIMD)
+{
+
+/*
+ * Dynamic implementation
+ * NOTE: Dmemcpy requires _no_ overlap
+ *
+ */
+
+/* Handle dynamic sizes. `d` and `s` must not overlap.
+ */
+void Dmemcpy(void *d, const(void) *s, size_t n)
+{
+    if (n <= 128)
+    {
+        Dmemcpy_small(d, s, n);
+    }
+    else
+    {
+        Dmemcpy_large(d, s, n);
+    }
+}
+
+/* Handle dynamic sizes <= 128. `d` and `s` must not overlap.
+ */
 void Dmemcpy_small(void *d, const(void) *s, size_t n)
 {
     if (n < 16) {
@@ -96,13 +225,6 @@ void Dmemcpy_small(void *d, const(void) *s, size_t n)
     }
     if (n <= 32)
     {
-        /*
-        import core.simd: void16, storeUnaligned, loadUnaligned;
-        void16 xmm0 = loadUnaligned(cast(const void16*)(s));
-        void16 xmm1 = loadUnaligned(cast(const void16*)(s-16+n));
-        storeUnaligned(cast(void16*)(d), xmm0);
-        storeUnaligned(cast(void16*)(d-16+n), xmm1);
-        */
         float4 xmm0 = load16f_sse(s);
         float4 xmm1 = load16f_sse(s-16+n);
         store16f_sse(d, xmm0);
@@ -133,6 +255,9 @@ void Dmemcpy_small(void *d, const(void) *s, size_t n)
     lstore64f_sse(d, s);
 }
 
+
+/* Handle dynamic sizes > 128. `d` and `s` must not overlap.
+ */
 // TODO(stefanos): I tried prefetching. I suppose
 // because this is a forward implementation, it should
 // actuall reduce performance, but a better check would be good.
@@ -181,6 +306,21 @@ void Dmemcpy_large(void *d, const(void) *s, size_t n)
 }
 
 
+/*
+ * Static implementation
+ * NOTE: Dmemcpy requires _no_ overlap
+ *
+ */
+
+/* Handy struct.
+ */
+struct S(size_t Size)
+{
+    ubyte[Size] x;
+}
+
+/* Handle static types.
+ */
 void Dmemcpy(T)(T *dst, const T *src)
 if (is(T == struct))
 {
@@ -259,6 +399,78 @@ if (is(T == struct))
     }
 }
 
+/* Scalar types.
+ */
+pragma(inline, true)
+void Dmemcpy(T)(T *dst, const T *src)
+if (isScalarType!T)
+{
+    *dst = *src;
+}
+
+/* Handles type sizes that are not powers of 2
+ */
+void DmemcpyUnsafe(T)(T *dst, const T *src) @trusted
+if (is(T == struct))
+{
+    import core.bitop: bsr;
+
+    static assert(T.sizeof != 0);
+    enum prevPowerOf2 = 1LU << bsr(T.sizeof);
+    alias TRemainder = S!(T.sizeof - prevPowerOf2);
+    auto s = cast(const S!prevPowerOf2*)(src);
+    auto d = cast(S!prevPowerOf2*)(dst);
+    static if (T.sizeof < 31)
+    {
+        pragma(inline, true);
+        Dmemcpy(d, s);
+        Dmemcpy(cast(TRemainder*)(d + 1), cast(const TRemainder*)(s + 1));
+    }
+    else
+    {
+        Dmemcpy(d, s);
+        Dmemcpy(cast(TRemainder*)(d + 1), cast(const TRemainder*)(s + 1));
+    }
+}
+
+}
+else
+{  // Simple (aka non-SIMD) versions.
+    void Dmemcpy(T)(T *dst, const T *src)
+    {
+        *dst = *src;   
+    }
+
+    // TODO(stefanos): GNU algorithm.
+    void Dmemcpy(void *d, const(void) *s, size_t n)
+    {
+        ubyte *dst = cast(ubyte*) d;
+        const(ubyte) *src = cast(const(ubyte)*) s;
+        for (size_t i = 0; i != n; ++i)
+        {
+            *dst = *src;
+            dst++;
+            src++;
+        }
+    }
+}
+
+
+
+/*
+ *
+ *
+ * memmove() implementation
+ *
+ *
+ */
+
+version (D_SIMD)
+{
+
+
+/* Handle dynamic sizes < 64 with backwards move. Overlap is possible.
+ */
 void Dmemmove_back_lt64(void *d, const(void) *s, size_t n)
 {
     if (n & 32)
@@ -298,11 +510,11 @@ void Dmemmove_back_lt64(void *d, const(void) *s, size_t n)
     }
 }
 
-// IMPORTANT(stefanos): memmove is supposed to return the dest
+
+/* Handle dynamic sizes with backwards move. Overlap is possible.
+ */
 void Dmemmove_back(void *d, const(void) *s, size_t n)
 {
-    import core.stdc.stdio: printf;
-
 START:
     if (n < 64)
     {
@@ -367,6 +579,8 @@ START:
     }
 }
 
+/* Handle dynamic sizes < 64 with forwards move. Overlap is possible.
+ */
 void Dmemmove_forw_lt64(void *d, const(void) *s, size_t n)
 {
     if (n & 32)
@@ -412,7 +626,8 @@ void Dmemmove_forw_lt64(void *d, const(void) *s, size_t n)
     }
 }
 
-// IMPORTANT(stefanos): memmove is supposed to return the dest
+/* Handle dynamic sizes with forwards move. Overlap is possible.
+ */
 void Dmemmove_forw(void *d, const(void) *s, size_t n)
 {
 START:
@@ -461,50 +676,26 @@ START:
     }
 }
 
-void Dmemmove(T)(T *dst, const T *src) {
-    void *d = dst;
-    const void *s = src;
-    if ((cast(ulong)d - cast(ulong)s) < T.sizeof)
-    {
-        Dmemmove_back(d, s, T.sizeof);
-    }
-    else if ((cast(ulong)s - cast(ulong)d) < T.sizeof)
-    {
-        Dmemmove_forw(d, s, T.sizeof);
-    }
-    else
-    {
-        Dmemcpy(dst, src);
-    }
 }
-
-
-/// DYNAMIC ///
-
-import core.stdc.stdio: printf;
-
-void Dmemmove(T)(ref T[] dst, const ref T[] src) {
-    assert(dst.length == src.length);
-    void *d = dst.ptr;
-    const void *s = src.ptr;
-    size_t n = dst.length * T.sizeof;
-    if ((cast(ulong)d - cast(ulong)s) < n)
-    {  // overlap with dst forward
-        Dmemmove_back(d, s, n);
-    }
-    else if ((cast(ulong)s - cast(ulong)d) < n)
-    {  // overlap with src forward
-        Dmemmove_forw(d, s, n);
-    }
-    else
-    {  // no overlap
-        if (n <= 128)
+else
+{
+    void Dmemmove_forw(void *d, const(void) *s, size_t n)
+    {
+        ubyte *dst = cast(ubyte*) d;
+        const(ubyte) *src = cast(const(ubyte)*) s;
+        foreach (i; 0 .. n)
         {
-            pragma(inline, true);
-            Dmemcpy_small(d, s, n);
-        } else {
-            pragma(inline, true);
-            Dmemcpy_large(d, s, n);
+            *(dst+i) = *(src+i);
+        }
+    }
+
+    void Dmemmove_back(void *d, const(void) *s, size_t n)
+    {
+        ubyte *dst = cast(ubyte*) d;
+        const(ubyte) *src = cast(const(ubyte)*) s;
+        foreach_reverse (i; 0 .. n)
+        {
+            *(dst+i) = *(src+i);
         }
     }
 }

@@ -10,12 +10,13 @@ import std.getopt;
 void main(string[] args)
 {
     auto help = getopt(args);
-    if (help.helpWanted || args.length != 3 || (args[1] != "tests" && args[1] != "benchmarks") || (args[2] != "ldc" && args[2] != "dmd"))
+    if (help.helpWanted || args.length != 3 || (args[1] != "tests" && args[1] != "benchmarks") || (args[2] != "ldc" && args[2] != "dmd" && args[2] != "gdc"))
     {
-        writeln("USAGE: rdmd run tests|benchmarks ldc|dmd");
+        writeln("USAGE: rdmd run tests|benchmarks ldc|dmd|gdc");
         return;
     }
 
+    // Detect CPU model.
     int model = detectModel();
     if (!model)
     {
@@ -23,17 +24,22 @@ void main(string[] args)
         return;
     }
     string compile, execute;
-    string func = "Dmemmove";
 
+    // Optimization options.
     if (args[2] == "ldc")
     {
         compile = "ldc2 -O3";
     }
     else if (args[2] == "dmd")
     {
-        compile = "rdmd -O -inline -I../ --build-only";
+        compile = "rdmd -O -inline"; 
+    }
+    else
+    {
+        compile = "gdc -O3";
     }
 
+    // Model choice.
     if (model == 32)
     {
         compile ~= " -m32";
@@ -43,21 +49,39 @@ void main(string[] args)
         compile ~= " -m64";
     }
 
+    // Specific to DMD. When having 'dmd` as an option, we compile
+    // with rdmd to take advantage of the monitoring of the files.
+    if (args[2] == "dmd")
+    {
+        compile ~= " --build-only";
+    }
+
+    // Files
     if (args[1] == "tests")
     {
-        compile ~= " tests.d " ~ func ~ ".d";
+        compile ~= " tests.d Dmemmove.d";
         execute = "./tests";
+        if (args[2] == "gdc")
+        {
+            compile ~= " -o tests";
+        }
     }
     else
     {
-        compile ~= " benchmarks.d " ~ func ~ ".d";
+        compile ~= " benchmarks.d Dmemmove.d";
+        if (args[2] == "gdc")
+        {
+            compile ~= " -o benchmarks";
+        }
         execute = "./benchmarks";
     }
-    compile ~= " ../noc/simd.d";
+
+    // Compile
     if(run(compile) != 0)
     {
         return;
     }
+    // Execute
     run(execute);
 }
 

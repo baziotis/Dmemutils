@@ -7,15 +7,28 @@ import std.process;
 import std.stdio;
 import std.getopt;
 
+void usageMsg()
+{
+    writeln("USAGE: rdmd run tests|benchmarks ldc|dmd|gdc (optionally: dbg)");
+}
+
 void main(string[] args)
 {
     auto help = getopt(args);
-    if (help.helpWanted || args.length != 3 || (args[1] != "tests" && args[1] != "benchmarks") || (args[2] != "ldc" && args[2] != "dmd" && args[2] != "gdc"))
+    if (help.helpWanted || (args.length != 3 && args.length != 4)
+        || (args[1] != "tests" && args[1] != "benchmarks")
+        || (args[2] != "ldc" && args[2] != "dmd" && args[2] != "gdc"))
     {
-        writeln("USAGE: rdmd run tests|benchmarks ldc|dmd|gdc");
+        usageMsg();
+        return;
+    }
+    if (args.length == 4 && args[3] != "dbg")
+    {
+        usageMsg();
         return;
     }
 
+    // Detect CPU model.
     int model = detectModel();
     if (!model)
     {
@@ -24,6 +37,7 @@ void main(string[] args)
     }
     string compile, execute;
 
+    // Optimization options.
     if (args[2] == "ldc")
     {
         compile = "ldc2 -O3";
@@ -37,6 +51,24 @@ void main(string[] args)
         compile = "gdc -O3";
     }
 
+    // Add debug info if requested.
+    if (args.length == 4)
+    {
+        compile ~= " -g";
+    }
+
+    // Disable builtins
+    if (args[2] == "gdc")
+    {
+        // NOTE(stefanos): Currently probably broken in GDC.
+        compile ~= " -fno-builtin";
+    }
+    else if (args[2] == "ldc")
+    {
+        // Could not find LDC equivalent.
+    }
+
+    // Model choice.
     if (model == 32)
     {
         compile ~= " -m32";
@@ -46,11 +78,14 @@ void main(string[] args)
         compile ~= " -m64";
     }
 
+    // Specific to DMD. When having 'dmd` as an option, we compile
+    // with rdmd to take advantage of the monitoring of the files.
     if (args[2] == "dmd")
     {
         compile ~= " --build-only";
     }
 
+    // Files
     if (args[1] == "tests")
     {
         compile ~= " tests.d Dmemset.d";
@@ -70,10 +105,16 @@ void main(string[] args)
         execute = "./benchmarks";
     }
 
+    // Compile
     if(run(compile) != 0)
     {
         return;
     }
+
+    // TODO(stefanos): If a segmentation fault happens (or the program fails
+    // for other reasons), the message is not printed to the user and thus
+    // seems like the program ran correctly.
+    // Execute
     run(execute);
 }
 

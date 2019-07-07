@@ -45,10 +45,16 @@ version (D_SIMD)
 {
     version = useSIMD;
 }
-version (LDC)
+else version (LDC)
 {
-    // LDC always supports SIMD and the back-end uses the most
-    // appropriate size for every target.
+    // LDC always supports SIMD (but doesn't ever set D_SIMD) and
+    // the back-end uses the most appropriate size for every target.
+    version = useSIMD;
+}
+else version (GNU)
+{
+    // GNU does not support SIMD by default. We have to do more complicated
+    // stuff below. So we start by default with useSIMD and decide later.
     version = useSIMD;
 }
 
@@ -57,34 +63,75 @@ version (useSIMD)
     /* SIMD implementation
      */
     //pragma(msg, "SIMD used");
-    private void Dmemset(void *d, const uint val, size_t n)
+    extern(C) private void Dmemset(void *d, const uint val, size_t n)
     {
         import core.simd : int4;
         version (LDC)
         {
+            enum gdcSIMD = false;
             import ldc.simd : loadUnaligned, storeUnaligned;
         }
         else version (DigitalMars)
         {
             import core.simd : void16, loadUnaligned, storeUnaligned;
         }
-        else
+        else version (GNU)
         {
-            static assert(0, "Only DMD / LDC are supported");
-        }
-        // TODO(stefanos): Is there a way to make them @safe?
-        // (The problem is that for LDC, they could take int* or float* pointers
-        // but the cast to void16 for DMD is necessary anyway).
-        void store16i_sse(void *dest, int4 reg)
-        {
-            version (LDC)
+            // NOTE(stefanos): I could not combine GDC versioning in `useSIMD`.
+            // To know if we can use SIMD for GDC is more complex. We need to:
+            // - Be in x86 arch since the intrinsics (builtins) are only x86 specific.
+            // - Compile the int4 vector size.
+            // TODO(stefanos): The GCC specification points that to use the store intrinsic,
+            // we have to be in SSE2. Is this guaranteed if `int4` compiles?
+            // Note that GCC builtins provide the __builtin_cpu_supports() but this is a runtime
+            // function.
+            version (X86_64)
             {
-                storeUnaligned!int4(reg, cast(int*) dest);
+                enum isX86 = true;
+            }
+            else version (X86)
+            {
+                enum isX86 = true;
+            }
+
+            static if (isX86 && __traits(compiles, int4))
+            {
+                enum gdcSIMD = true;
             }
             else
             {
-                storeUnaligned(cast(void16*) dest, reg);
+                memsetNaive(d, val, n);
+                return;
             }
+        }
+
+        // TODO(stefanos): Is there a way to make them @safe?
+        // (The problem is that for LDC, they could take int* or float* pointers
+        // but the cast to void16 for DMD is necessary anyway).
+
+        static if (gdcSIMD)
+        {
+            import gcc.builtins;
+            import core.simd : ubyte16;
+            void store16i_sse(void *dest, int4 reg)
+            {
+                __builtin_ia32_storedqu(cast(char*) dest, cast(ubyte16) reg);
+            }
+        }
+        else
+        {
+            void store16i_sse(void *dest, int4 reg)
+            {
+                version (LDC)
+                {
+                    storeUnaligned!int4(reg, cast(int*) dest);
+                }
+                else
+                {
+                    storeUnaligned(cast(void16*) dest, reg);
+                }
+            }
+
         }
         void store32i_sse(void *dest, int4 reg)
         {
@@ -92,17 +139,17 @@ version (useSIMD)
             store16i_sse(dest+0x10, reg);
         }
 
-        const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
         // NOTE(stefanos): I use the naive version, which in my benchmarks was slower
         // than the previous classic switch. BUT. Using the switch had a significant
         // drop in the rest of the sizes. It's not the branch that is responsible for the drop,
         // but the fact that it's more difficult to optimize it as part of the rest of the code.
-        if (n <= 16)
+        if (n < 32)
         {
             memsetNaive(cast(ubyte*) d, cast(ubyte) val, n);
             return;
         }
         void *temp = d + n - 0x10;                  // Used for the last 32 bytes
+        const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
         // Broadcast v to all bytes.
         auto xmm0 = int4(v);
         ubyte rem = cast(ubyte) d & 15;              // Remainder from the previous 16-byte boundary.

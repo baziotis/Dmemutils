@@ -73,6 +73,7 @@ version (useSIMD)
         }
         else version (DigitalMars)
         {
+            enum gdcSIMD = false;
             import core.simd : void16, loadUnaligned, storeUnaligned;
         }
         else version (GNU)
@@ -145,7 +146,7 @@ version (useSIMD)
         // but the fact that it's more difficult to optimize it as part of the rest of the code.
         if (n < 32)
         {
-            memsetNaive(cast(ubyte*) d, cast(ubyte) val, n);
+            memsetNaive(d, val, n);
             return;
         }
         void *temp = d + n - 0x10;                  // Used for the last 32 bytes
@@ -199,13 +200,69 @@ else
     }
 }
 
+// NOTE(stefanos): We're using naive for the < 32 case in the SIMD version.
+// To be more performant, for that case, we would have a big fall-through switch
+// for all < 32 sizes.
 private void memsetNaive(void *dst, const uint val, size_t n)
 {
-    ubyte *d = cast(ubyte*) dst;
-    foreach (i; 0 .. n)
+    const ulong v = cast(ulong) val * 0x0101010101010101;  // Broadcast c to all 8 bytes
+    enum handleLT16Sizes = "
+    switch (n)
     {
-        d[i] = cast(ubyte)val;
+        case 6:
+            *(cast(uint*) (dst+2)) = cast(uint) v;
+            goto case 2;  // fall-through
+        case 2:
+            *(cast(ushort*) dst) = cast(ushort) v;
+            return;
+
+        case 7:
+            *(cast(uint*) (dst+3)) = cast(uint) v;
+            goto case 3;  // fall-through
+        case 3:
+            *(cast(ushort*) (dst+1)) = cast(ushort) v;
+            goto case 1;  // fall-through
+        case 1:
+            *(cast(ubyte*) dst) = cast(ubyte) v;
+            return;
+
+        case 4:
+            *(cast(uint*) dst) = cast(uint) v;
+            return;
+        case 0:
+            return;
+
+        case 5:
+            *(cast(uint*) (dst+1)) = cast(uint) v;
+            *(cast(ubyte*) dst) = cast(ubyte) v;
+            return;
+        default:
     }
+    ";
+    mixin(handleLT16Sizes);
+    
+    // NOTE(stefanos): Normally, we would have different alignment
+    // for 32-bit and 64-bit versions. For the sake of simplicity,
+    // we'll let the compiler do the work.
+    ubyte rem = cast(ubyte) dst & 7;
+    if (rem)
+    {  // Unaligned
+        // Move 8 bytes (which we will possibly overlap later).
+        *(cast(ulong*) dst) = v;
+        dst += 8 - rem;
+        n -= 8 - rem;
+    }
+    ulong *d = cast(ulong*) dst;
+    ulong temp = n / 8;
+    for(size_t i = 0; i != temp; ++i)
+    {
+        *d = v;
+        ++d;
+        n -= 8;
+    }
+    dst = cast(void *) d;
+
+    mixin(handleLT16Sizes);
 }
 
 /** Core features tests.

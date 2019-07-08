@@ -1,6 +1,6 @@
 /**
- * This is the latest memutils.d file PR'd to the D runtime. BE CAREFUL, it may or may not work on its own. It's uploaded
- * here so that you can stay up to date.
+ * Pure D replacement of the C Standard Library basic memory building blocks of string.h
+ * Source: $(DRUNTIMESRC core/experimental/memutils.d)
  */
 module core.experimental.memutils;
 
@@ -13,12 +13,11 @@ module core.experimental.memutils;
  */
 
 /*
-  If T is an array,set all `dst`'s bytes
+  If T is an array, set all `dst`'s bytes
   (whose count is the length of the array times
   the size of the array element) to `val`.
   Otherwise, set T.sizeof bytes to `val` starting from the address of `dst`.
 */
-
 void memset(T)(ref T dst, const ubyte val)
 {
     import core.internal.traits : isArray;
@@ -34,71 +33,117 @@ void memset(T)(ref T dst, const ubyte val)
     }
 }
 
-version (GNU)
-{
-    private void Dmemset(void *d, const uint val, size_t n)
-    {
-        memsetNaive(d, val, n);
-    }
-}
-else
+
 version (D_SIMD)
+{
+    version = useSIMD;
+}
+else version (LDC)
+{
+    // LDC always supports SIMD (but doesn't ever set D_SIMD) and
+    // the back-end uses the most appropriate size for every target.
+    version = useSIMD;
+}
+else version (GNU)
+{
+    // GNU does not support SIMD by default. We have to do more complicated
+    // stuff below. So we start by default with useSIMD and decide later.
+    version = useSIMD;
+}
+
+version (useSIMD)
 {
     /* SIMD implementation
      */
-    private void Dmemset(void *d, const uint val, size_t n)
+    //pragma(msg, "SIMD used");
+    extern(C) private void Dmemset(void *d, const uint val, size_t n)
     {
         import core.simd : int4;
         version (LDC)
         {
+            enum gdcSIMD = false;
             import ldc.simd : loadUnaligned, storeUnaligned;
         }
         else version (DigitalMars)
         {
+            enum gdcSIMD = false;
             import core.simd : void16, loadUnaligned, storeUnaligned;
         }
-        else
+        else version (GNU)
         {
-            static assert(0, "Only DMD / LDC are supported");
+            // NOTE(stefanos): I could not combine GDC versioning in `useSIMD`.
+            // To know if we can use SIMD for GDC is more complex. We need to:
+            // - Be in x86 arch since the intrinsics (builtins) are only x86 specific.
+            // - Compile the int4 vector size.
+            // TODO(stefanos): The GCC specification points that to use the store intrinsic,
+            // we have to be in SSE2. Is this guaranteed if `int4` compiles?
+            // Note that GCC builtins provide the __builtin_cpu_supports() but this is a runtime
+            // function.
+            version (X86_64)
+            {
+                enum isX86 = true;
+            }
+            else version (X86)
+            {
+                enum isX86 = true;
+            }
+
+            static if (isX86 && __traits(compiles, int4))
+            {
+                enum gdcSIMD = true;
+            }
+            else
+            {
+                memsetNaive(d, val, n);
+                return;
+            }
         }
+
         // TODO(stefanos): Is there a way to make them @safe?
         // (The problem is that for LDC, they could take int* or float* pointers
         // but the cast to void16 for DMD is necessary anyway).
+
+        static if (gdcSIMD)
+        {
+            import gcc.builtins;
+            import core.simd : ubyte16;
+            void store16i_sse(void *dest, int4 reg)
+            {
+                __builtin_ia32_storedqu(cast(char*) dest, cast(ubyte16) reg);
+            }
+        }
+        else
+        {
+            void store16i_sse(void *dest, int4 reg)
+            {
+                version (LDC)
+                {
+                    storeUnaligned!int4(reg, cast(int*) dest);
+                }
+                else
+                {
+                    storeUnaligned(cast(void16*) dest, reg);
+                }
+            }
+
+        }
         void store32i_sse(void *dest, int4 reg)
         {
-            version (LDC)
-            {
-                storeUnaligned!int4(reg, cast(int*) dest);
-                storeUnaligned!int4(reg, cast(int*) (dest+0x10));
-            }
-            else
-            {
-                storeUnaligned(cast(void16*) dest, reg);
-                storeUnaligned(cast(void16*) (dest+0x10), reg);
-            }
+            store16i_sse(dest, reg);
+            store16i_sse(dest+0x10, reg);
         }
-        void store16i_sse(void *dest, int4 reg)
-        {
-            version (LDC)
-            {
-                storeUnaligned!int4(reg, cast(int*) dest);
-            }
-            else
-            {
-                storeUnaligned(cast(void16*) dest, reg);
-            }
-        }
-        const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
+
         // NOTE(stefanos): I use the naive version, which in my benchmarks was slower
         // than the previous classic switch. BUT. Using the switch had a significant
         // drop in the rest of the sizes. It's not the branch that is responsible for the drop,
         // but the fact that it's more difficult to optimize it as part of the rest of the code.
-        if (n <= 16)
+        if (n < 32)
         {
-            memsetNaive(cast(ubyte*) d, cast(ubyte) val, n);
+            memsetNaive(d, val, n);
             return;
         }
         void *temp = d + n - 0x10;                  // Used for the last 32 bytes
+        const uint v = val * 0x01010101;            // Broadcast c to all 4 bytes
         // Broadcast v to all bytes.
         auto xmm0 = int4(v);
         ubyte rem = cast(ubyte) d & 15;              // Remainder from the previous 16-byte boundary.
@@ -140,23 +185,77 @@ version (D_SIMD)
 }
 else
 {
+    /* Forward to simple implementation.
+     */
     private void Dmemset(void *d, const uint val, size_t n)
     {
         memsetNaive(d, val, n);
     }
 }
 
-/* Naive implementation
- */
+// NOTE(stefanos): We're using naive for the < 32 case in the SIMD version.
+// To be more performant, for that case, we would have a big fall-through switch
+// for all < 32 sizes.
 private void memsetNaive(void *dst, const uint val, size_t n)
 {
-    ubyte *d = cast(ubyte*) dst;
-    foreach (i; 0 .. n)
+    const ulong v = cast(ulong) val * 0x0101010101010101;  // Broadcast val to all 8 bytes
+    enum handleLT16Sizes = "
+    switch (n)
     {
-        d[i] = cast(ubyte)val;
-    }
-}
+        case 6:
+            *(cast(uint*) (dst+2)) = cast(uint) v;
+            goto case 2;  // fall-through
+        case 2:
+            *(cast(ushort*) dst) = cast(ushort) v;
+            return;
 
+        case 7:
+            *(cast(uint*) (dst+3)) = cast(uint) v;
+            goto case 3;  // fall-through
+        case 3:
+            *(cast(ushort*) (dst+1)) = cast(ushort) v;
+            goto case 1;  // fall-through
+        case 1:
+            *(cast(ubyte*) dst) = cast(ubyte) v;
+            return;
+
+        case 4:
+            *(cast(uint*) dst) = cast(uint) v;
+            return;
+        case 0:
+            return;
+
+        case 5:
+            *(cast(uint*) (dst+1)) = cast(uint) v;
+            *(cast(ubyte*) dst) = cast(ubyte) v;
+            return;
+        default:
+    }
+    ";
+    mixin(handleLT16Sizes);
+    // NOTE(stefanos): Normally, we would have different alignment
+    // for 32-bit and 64-bit versions. For the sake of simplicity,
+    // we'll let the compiler do the work.
+    ubyte rem = cast(ubyte) dst & 7;
+    if (rem)
+    {  // Unaligned
+        // Move 8 bytes (which we will possibly overlap later).
+        *(cast(ulong*) dst) = v;
+        // Reach alignment
+        dst += 8 - rem;
+        n -= 8 - rem;
+    }
+    ulong *d = cast(ulong*) dst;
+    ulong temp = n / 8;
+    for (size_t i = 0; i != temp; ++i)
+    {
+        *d = v;
+        ++d;  // += 8
+        n -= 8;
+    }
+    dst = cast(void *) d;
+    mixin(handleLT16Sizes);
+}
 
 /** Core features tests.
   */

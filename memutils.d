@@ -33,7 +33,6 @@ void memset(T)(ref T dst, const ubyte val)
     }
 }
 
-
 version (D_SIMD)
 {
     version = useSIMD;

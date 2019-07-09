@@ -7,12 +7,24 @@ import std.process;
 import std.stdio;
 import std.getopt;
 
+void usageMsg()
+{
+    writeln("USAGE: rdmd run tests|benchmarks ldc|dmd|gdc (optionally: dbg)");
+}
+
 void main(string[] args)
 {
     auto help = getopt(args);
-    if (help.helpWanted || args.length != 3 || (args[1] != "tests" && args[1] != "benchmarks") || (args[2] != "ldc" && args[2] != "dmd" && args[2] != "gdc"))
+    if (help.helpWanted || (args.length != 3 && args.length != 4)
+        || (args[1] != "tests" && args[1] != "benchmarks")
+        || (args[2] != "ldc" && args[2] != "dmd" && args[2] != "gdc"))
     {
-        writeln("USAGE: rdmd run tests|benchmarks ldc|dmd|gdc");
+        usageMsg();
+        return;
+    }
+    if (args.length == 4 && args[3] != "dbg")
+    {
+        usageMsg();
         return;
     }
 
@@ -37,6 +49,23 @@ void main(string[] args)
     else
     {
         compile = "gdc -O3";
+    }
+
+    // Add debug info if requested.
+    if (args.length == 4)
+    {
+        compile ~= " -g";
+    }
+
+    // Disable builtins
+    if (args[2] == "gdc")
+    {
+        // NOTE(stefanos): Currently probably broken in GDC.
+        compile ~= " -fno-builtin";
+    }
+    else if (args[2] == "ldc")
+    {
+        // Could not find LDC equivalent.
     }
 
     // Model choice.
@@ -81,6 +110,10 @@ void main(string[] args)
     {
         return;
     }
+
+    // TODO(stefanos): If a segmentation fault happens (or the program fails
+    // for other reasons), the message is not printed to the user and thus
+    // seems like the program ran correctly.
     // Execute
     run(execute);
 }

@@ -68,34 +68,71 @@ if (isIntegral!T)
     return (x != 0) && ((x & (x - 1)) == 0);
 }
 
-/* Little SIMD library
+/* Can we use SIMD?
  */
+import core.simd: float4;
 version (D_SIMD)
 {
-    import core.simd: float4;
+    enum useSIMD = true;
+}
+else version (LDC)
+{
+    // LDC always supports SIMD (but doesn't ever set D_SIMD) and
+    // the back-end uses the most appropriate size for every target.
+    enum useSIMD = true;
+}
+else version (GNU)
+{
+    // GNU does not support SIMD by default.
+    version (X86_64)
+    {
+        enum isX86 = true;
+    }
+    else version (X86)
+    {
+        enum isX86 = true;
+    }
+
+    static if (isX86 && __traits(compiles, float))
+    {
+        enum useSIMD = true;
+    }
+    else
+    {
+        enum useSIMD = false;
+    }
+}
+
+/* Little SIMD library
+ */
+static if (useSIMD)
+{
     version (LDC)
     {
         import ldc.simd: loadUnaligned, storeUnaligned;
     }
-    else
-    version (DigitalMars)
+    else version (DigitalMars)
     {
         import core.simd: void16, loadUnaligned, storeUnaligned;
     }
-    else
+    else version (GNU)
     {
-        static assert(0, "Only DMD / LDC are supported");
+        import gcc.builtins : __builtin_ia32_storeups, __builtin_ia32_loadups;
     }
-    
+
     void store16f_sse(void *dest, float4 reg)
     {
         version (LDC)
         {
             storeUnaligned!float4(reg, cast(float*)dest);
         }
-        else
+        else version (DigitalMars)
         {
             storeUnaligned(cast(void16*)dest, reg);
+        }
+        else version (GNU)
+        {
+            __builtin_ia32_storeups(cast(float*) dest, reg);
         }
     }
     
@@ -103,22 +140,48 @@ version (D_SIMD)
     {
         version (LDC)
         {
-            return loadUnaligned!(float4)(cast(const(float) *)src);
+            return loadUnaligned!(float4)(cast(const(float)*) src);
         }
-        else
+        else version (DigitalMars)
         {
-            return loadUnaligned(cast(void16*)src);
+            return loadUnaligned(cast(void16*) src);
+        } else version (GNU)
+        {
+            return __builtin_ia32_loadups(cast(float*) src);
         }
+    }
+
+    void prefetchForward(void *s)
+    {
+        enum writeFetch = 0;
+        enum locality = 3;  // -> t0
+        version (DigitalMars)
+        {
+            import core.simd : prefetch;
+            prefetch!(writeFetch, locality)(s+0x1a0);
+            prefetch!(writeFetch, locality)(s+0x280);
+        }
+        else version (LDC)
+        {
+            import ldc.intrinsics : llvm_prefetch;
+            enum dataCache = 1;
+            llvm_prefetch(s+0x1a0, writeFetch, locality, dataCache);
+            llvm_prefetch(s+0x280, writeFetch, locality, dataCache);
+        }
+        else version (GNU)
+        {
+            import gcc.builtins : __builtin_prefetch;
+            __builtin_prefetch(s+0x1a0, writeFetch, locality);
+            __builtin_prefetch(s+0x280, writeFetch, locality);
+        }
+
     }
     
-    /*
-    void _store128fp_sse(void *d, const(void) *s)
+    void lstore128fp_sse(void *d, const(void) *s)
     {
-        _mm_prefetch!(0)(s+0x1a0);
-        _mm_prefetch!(0)(s+0x280);
-        store128f_sse(d, s);
+        prefetchForward(cast(void*) s);
+        lstore128f_sse(d, s);
     }
-    */
     
     void lstore128f_sse(void *d, const(void) *s)
     {
@@ -171,7 +234,7 @@ version (D_SIMD)
  *
  */
 
-version (D_SIMD)
+static if (useSIMD)
 {
 
 /*
@@ -288,13 +351,28 @@ void Dmemcpy_large(void *d, const(void) *s, size_t n)
         n -= 16 - rem;
     }
 
-    while (n >= 128)
+    static string loop(string prefetchChoice)()
     {
-        // Aligned stores / writes
-        lstore128f_sse(d, s);
-        d += 128;
-        s += 128;
-        n -= 128;
+        return
+        "
+        while (n >= 128)
+        {
+            // Aligned stores / writes
+            " ~ prefetchChoice ~ "(d, s);
+            d += 128;
+            s += 128;
+            n -= 128;
+        }
+        ";
+    }
+
+    if (n >= 20000)
+    {
+        mixin(loop!("lstore128fp_sse")());
+    }
+    else
+    {
+        mixin(loop!("lstore128f_sse")());
     }
 
     // NOTE(stefanos): We already have checked that the initial size is >= 128
@@ -465,8 +543,9 @@ else
  *
  */
 
-version (D_SIMD)
+static if (useSIMD)
 {
+    pragma(msg, "SIMD used");
 
 
 /* Handle dynamic sizes < 64 with backwards move. Overlap is possible.
@@ -555,7 +634,7 @@ START:
     {
         // NOTE(stefanos): No problem with the overlap here since
         // we never use overlapped bytes. But, we should still copy backwards.
-        // TODO(stefanos): Explore prefetching.
+        // NOTE(stefanos): Prefetching had ambiguous and not clear win.
         store16f_sse(d-0x10, load16f_sse(s-0x10));
         store16f_sse(d-0x20, load16f_sse(s-0x20));
         store16f_sse(d-0x30, load16f_sse(s-0x30));
@@ -663,6 +742,8 @@ START:
     {
         // NOTE(stefanos): No problem with the overlap here since
         // we never use overlapped bytes.
+        // NOTE(stefanos): Prefetching had a relatively insignificant
+        // win for about > 30000.
         lstore128f_sse(d, s);
         s += 128;
         d += 128;

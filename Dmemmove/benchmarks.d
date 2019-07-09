@@ -43,10 +43,27 @@ static string genTests()
     return res;
 }
 
+static string getStaticTests()
+{
+    import std.conv : text;
+    string res;
+    foreach (i; 1..65)
+    {
+        res ~= "testStaticType!(S!"~text(i)~");\n";
+    }
+    return res;
+}
+
+struct S(size_t Size)
+{
+    ubyte[Size] x;
+}
+
 void main(string[] args)
 {
     // For performing benchmarks
     writeln("size(bytes) Cmemmove(GB/s) Dmemmove(GB/s)");
+    mixin(getStaticTests());
     mixin(genTests());
     test!(500);
     test!(700);
@@ -89,6 +106,13 @@ void Cmemmove(ref ubyte[] dst, const ref ubyte[] src)
     memmove(dst.ptr, src.ptr, dst.length);
 }
 
+void Cmemmove(T)(T *dst, const T *src)
+{
+    import core.stdc.string: memmove;
+    pragma(inline, true)
+    memmove(dst, src, T.sizeof);
+}
+
 Duration benchmark(alias f)(ref ubyte[] dst, const ref ubyte[] src, ulong *bytesCopied)
 {
     assert(dst.length == src.length);
@@ -114,6 +138,80 @@ Duration benchmark(alias f)(ref ubyte[] dst, const ref ubyte[] src, ulong *bytes
     return result;
 }
 
+Duration benchmark(T, alias f)(ref T dst, const ref T src, ulong *bytesCopied)
+{
+    size_t iterations = 2^^20 / T.sizeof;
+    Duration result;
+
+    auto swt = StopWatch(AutoStart.yes);
+    swt.reset();
+    while(swt.peek().total!"msecs" < 5)
+    {
+        auto sw = StopWatch(AutoStart.yes);
+        sw.reset();
+        foreach (_; 0 .. iterations)
+        {
+            escape(cast(void*)&dst);   // So optimizer doesn't remove code
+            f(&dst, &src);
+            escape(cast(void*)&src);   // So optimizer doesn't remove code
+        }
+        result += sw.peek();
+        *bytesCopied += (iterations * T.sizeof);
+    }
+
+    return result;
+}
+
+
+pragma(inline, false)
+void initStatic(T)(T *v)
+{
+    static if (is(T == float))
+    {
+        *v = uniform(0.0f, 9_999_999.0f);
+    }
+    else static if (is(T == double))
+    {
+        *v = uniform(0.0, 9_999_999.0);
+    }
+    else static if (is(T == real))
+    {
+        *v = uniform(0.0L, 9_999_999.0L);
+    }
+    else
+    {
+        auto m = (cast(ubyte*)v)[0 .. T.sizeof];
+        for(int i = 0; i < m.length; i++)
+        {
+            m[i] = uniform!byte;
+        }
+    }
+}
+
+pragma(inline, false)
+void testStaticType(T)()
+{
+    T d, s;
+    initStatic!(T)(&d);
+    initStatic!(T)(&s);
+
+    ulong bytesCopied1;
+    ulong bytesCopied2;
+    immutable d1 = benchmark!(T, Cmemmove)(d, s, &bytesCopied1);
+
+    immutable d2 = benchmark!(T, Dmemmove)(d, s, &bytesCopied2);
+
+    auto secs1 = (cast(double)(d1.total!"nsecs")) / 1_000_000_000.0;
+    auto secs2 = (cast(double)(d2.total!"nsecs")) / 1_000_000_000.0;
+    auto GB1 = (cast(double)bytesCopied1) / 1_000_000_000.0;
+    auto GB2 = (cast(double)bytesCopied2) / 1_000_000_000.0;
+    auto GBperSec1 = GB1 / secs1;
+    auto GBperSec2 = GB2 / secs2;
+    writeln(T.sizeof, " ", GBperSec1, " ", GBperSec2, " - Static type: ", T.stringof);
+}
+
+
+
 void init(ref ubyte[] v)
 {
     for(int i = 0; i < v.length; i++)
@@ -125,11 +223,13 @@ void init(ref ubyte[] v)
 
 void test(size_t n)()
 {
-    ubyte[80000] buf1;
-    ubyte[80000] buf2;
+    ubyte[100000] buf1;
+    ubyte[100000] buf2;
 
     // TODO(stefanos): This should be a static foreach
-    for (int j = 0; j < 3; ++j) {
+    //for (int j = 0; j < 3; ++j)
+    int j = 1;
+    {
         double TotalGBperSec1 = 0.0;
         double TotalGBperSec2 = 0.0;
         enum alignments = 32;

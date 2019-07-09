@@ -25,11 +25,17 @@ DEALINGS IN THE SOFTWARE.
 */
 
 import Dmemmove: Dmemmove;
-import S_struct;
 import std.random;
 import std.stdio;
 import core.stdc.string;
 import std.traits;
+
+/* Handy struct
+ */
+struct S(size_t Size)
+{
+    ubyte[Size] x;
+}
 
 static string genTests()
 {

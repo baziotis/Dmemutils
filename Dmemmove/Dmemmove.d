@@ -60,14 +60,6 @@ void Dmemmove(T)(ref T[] dst, const ref T[] src) {
     }
 }
 
-/* Handy function to test if an integer is power of 2.
- */
-bool isPowerOf2(T)(T x)
-if (isIntegral!T)
-{
-    return (x != 0) && ((x & (x - 1)) == 0);
-}
-
 /* Can we use SIMD?
  */
 import core.simd: float4;
@@ -234,14 +226,30 @@ static if (useSIMD)
  *
  */
 
-static if (useSIMD)
+/*
+ * Static implementation
+ *
+ */
+
+/* Handle static types.
+ */
+// NOTE(stefanos): Previously, there was more sophisticated code
+// for static types. But the rationale of removing it is that
+// the compiler knows better how to optimize static types.
+pragma(inline, true)
+void Dmemcpy(T)(T *dst, const T *src)
 {
+    *dst = *src;
+}
 
 /*
  * Dynamic implementation
  * NOTE: Dmemcpy requires _no_ overlap
  *
  */
+static if (useSIMD)
+{
+
 
 /* Handle dynamic sizes. `d` and `s` must not overlap.
  */
@@ -282,8 +290,7 @@ void Dmemcpy_small(void *d, const(void) *s, size_t n)
         }
         if (n & 0x08)
         {
-            *cast(ulong*)d = *cast(const ulong*)s;
-        }
+            *cast(ulong*)d = *cast(const ulong*)s; }
         return;
     }
     if (n <= 32)
@@ -383,142 +390,11 @@ void Dmemcpy_large(void *d, const(void) *s, size_t n)
     }
 }
 
-
-/*
- * Static implementation
- * NOTE: Dmemcpy requires _no_ overlap
- *
- */
-
-/* Handy struct.
- */
-struct S(size_t Size)
-{
-    ubyte[Size] x;
-}
-
-/* Handle static types.
- */
-void Dmemcpy(T)(T *dst, const T *src)
-if (is(T == struct))
-{
-    static if (T.sizeof == 1)
-    {
-        pragma(inline, true)
-        Dmemcpy(cast(ubyte*)(dst), cast(const ubyte*)(src));
-        return;
-    }
-    else static if (T.sizeof == 2)
-    {
-        pragma(inline, true)
-        Dmemcpy(cast(ushort*)(dst), cast(const ushort*)(src));
-        return;
-    }
-    else static if (T.sizeof == 4)
-    {
-        pragma(inline, true)
-        Dmemcpy(cast(uint*)(dst), cast(const uint*)(src));
-        return;
-    }
-    else static if (T.sizeof == 8)
-    {
-        pragma(inline, true)
-        Dmemcpy(cast(ulong*)(dst), cast(const ulong*)(src));
-        return;
-    }
-    else static if (T.sizeof == 16)
-    {
-        version(D_SIMD)
-        {
-            //pragma(inline, true)
-            import core.simd: void16, storeUnaligned, loadUnaligned;
-            storeUnaligned(cast(void16*)(dst), loadUnaligned(cast(const void16*)(src)));
-        }
-        else
-        {
-            //pragma(inline, true)
-            foreach(i; 0 .. T.sizeof/8)
-            {
-                Dmemcpy((cast(ulong*)dst) + i, (cast(const ulong*)src) + i);
-            }
-        }
-
-        return;
-    }
-    else static if (T.sizeof == 32)
-    {
-        //pragma(inline, true)
-        foreach(i; 0 .. T.sizeof/16)
-        {
-            Dmemcpy((cast(S!16*)dst) + i, (cast(const S!16*)src) + i);
-        }
-        return;
-    }
-    else static if (T.sizeof < 64 && !isPowerOf2(T.sizeof))
-    {
-        //pragma(inline, true)
-        DmemcpyUnsafe(dst, src);
-        return;
-    }
-    else static if (T.sizeof == 64)
-    {
-        Dmemcpy(cast(S!32*)dst, cast(const S!32*)src) ;
-        Dmemcpy((cast(S!32*)dst) + 1, (cast(const S!32*)src) + 1);
-    }
-    else static if (T.sizeof <= 128)
-    {
-        pragma(inline, true);
-        Dmemcpy_small(dst, src, T.sizeof);       
-    }
-    else
-    {
-        pragma(inline, true);
-        Dmemcpy_large(dst, src, T.sizeof);       
-    }
-}
-
-/* Scalar types.
- */
-pragma(inline, true)
-void Dmemcpy(T)(T *dst, const T *src)
-if (isScalarType!T)
-{
-    *dst = *src;
-}
-
-/* Handles type sizes that are not powers of 2
- */
-void DmemcpyUnsafe(T)(T *dst, const T *src) @trusted
-if (is(T == struct))
-{
-    import core.bitop: bsr;
-
-    static assert(T.sizeof != 0);
-    enum prevPowerOf2 = 1LU << bsr(T.sizeof);
-    alias TRemainder = S!(T.sizeof - prevPowerOf2);
-    auto s = cast(const S!prevPowerOf2*)(src);
-    auto d = cast(S!prevPowerOf2*)(dst);
-    static if (T.sizeof < 31)
-    {
-        pragma(inline, true);
-        Dmemcpy(d, s);
-        Dmemcpy(cast(TRemainder*)(d + 1), cast(const TRemainder*)(s + 1));
-    }
-    else
-    {
-        Dmemcpy(d, s);
-        Dmemcpy(cast(TRemainder*)(d + 1), cast(const TRemainder*)(s + 1));
-    }
-}
-
 }
 else
-{  // Simple (aka non-SIMD) versions.
-    void Dmemcpy(T)(T *dst, const T *src)
-    {
-        *dst = *src;   
-    }
-
+{
+    /* Non-SIMD version
+     */
     // TODO(stefanos): GNU algorithm.
     void Dmemcpy(void *d, const(void) *s, size_t n)
     {
@@ -545,7 +421,6 @@ else
 
 static if (useSIMD)
 {
-    pragma(msg, "SIMD used");
 
 
 /* Handle dynamic sizes < 64 with backwards move. Overlap is possible.

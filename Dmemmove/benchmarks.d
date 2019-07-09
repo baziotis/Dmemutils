@@ -26,11 +26,12 @@ DEALINGS IN THE SOFTWARE.
 
 import std.datetime.stopwatch;
 import Dmemmove: Dmemmove;
-import S_struct;
 import std.random;
 import std.stdio;
 import core.stdc.string;
 import std.traits;
+
+
 
 static string genTests()
 {
@@ -54,6 +55,8 @@ static string getStaticTests()
     return res;
 }
 
+/* Handy struct
+ */
 struct S(size_t Size)
 {
     ubyte[Size] x;
@@ -227,8 +230,7 @@ void test(size_t n)()
     ubyte[100000] buf2;
 
     // TODO(stefanos): This should be a static foreach
-    //for (int j = 0; j < 3; ++j)
-    int j = 1;
+    for (int j = 0; j < 3; ++j)
     {
         double TotalGBperSec1 = 0.0;
         double TotalGBperSec2 = 0.0;

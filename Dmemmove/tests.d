@@ -67,7 +67,7 @@ void main(string[] args)
     testStaticType!(double);
     // TODO - IMPORTANT(stefanos): This fails for reasons I don't know, on LDC.
     // Note that `real` is supposed to be 80 bits = 10 bytes, but T.sizeof outputs 16 bytes
-    //testStaticType!(real);
+    testStaticType!(real);
     mixin(genTests());
     testStaticType!(S!3452);
     testStaticArray!(3452)();
@@ -136,7 +136,24 @@ void verifyStaticType(T)(const T *a, const T *b)
 {
     const ubyte *aa = (cast(const ubyte*)a);
     const ubyte *bb = (cast(const ubyte*)b);
-    for(size_t i = 0; i < T.sizeof; i++)
+    // NOTE(stefanos): `real` is an exceptional case,
+    // in that it behaves differently across compilers
+    // because it's not a power of 2 (its size is 10 for x86)
+    // and thus padding is added (to reach 16). But, the padding bytes
+    // are not considered (by the compiler) in a move (for instance).
+    // So, Dmemcpy, for static types, is *dst = *src. And the compiler
+    // might output `fld` followed by `fstp` instruction. Those intructions
+    // operate on extended floating point values (whose size is 10). And so,
+    // the padding bytes are not copied to dest.
+    static if (is(T == real))
+    {
+        enum n = 10;
+    }
+    else
+    {
+        enum n = T.sizeof;
+    }
+    for(size_t i = 0; i < n; i++)
     {
         assert(aa[i] == bb[i]);
     }

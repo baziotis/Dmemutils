@@ -21,11 +21,12 @@ ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEalINGS IN THE SOFTWARE.
 */
 
-import std.traits : isScalarType, isIntegral;
+import std.traits : isArray;
 
-void Dmemmove(T)(T *dst, const T *src) {
-    void *d = dst;
-    const void *s = src;
+void Dmemmove(T)(T *dst, const T *src)
+{
+    void *d = cast(void*) dst;
+    const(void) *s = cast(void*) src;
     if ((cast(ulong)d - cast(ulong)s) < T.sizeof)
     {  // There is overlap with dest being ahead. Use backwards move.
         Dmemmove_back(d, s, T.sizeof);
@@ -40,11 +41,46 @@ void Dmemmove(T)(T *dst, const T *src) {
     }
 }
 
-void Dmemmove(T)(ref T[] dst, const ref T[] src) {
+unittest
+{
+    real a = 1.2;
+    real b;
+    Dmemmove(&b, &a);
+    assert(b == 1.2);
+ 
+    // Overwrite the type system and create overlap with dst forward.   
+    ubyte[8] buf;
+    int *p = cast(int*) buf.ptr;
+    int *q = cast(int*) (buf.ptr + 2);
+    *p = 203847;
+    Dmemmove(q, p);
+    assert(*q == 203847);
+
+    // Create overlap with src forward.
+    *q = 92239;
+    Dmemmove(p, q);
+    assert(*p == 92239);
+}
+
+/* Dynamic Arrays
+ */
+void Dmemmove(T)(T[] dst, const T[] src)
+{
+    mixin(arrayCode);
+}
+
+/* Static Arrays
+ */
+void Dmemmove(T, size_t len)(ref T[len] dst, ref const T[len] src)
+{
+    mixin(arrayCode);
+}
+
+enum arrayCode = "
     assert(dst.length == src.length);
-    void *d = dst.ptr;
-    const void *s = src.ptr;
-    size_t n = dst.length * T.sizeof;
+    void *d = cast(void*) dst.ptr;
+    const void *s = cast(const(void)*) src.ptr;
+    size_t n = dst.length * typeof(dst[0]).sizeof;
     if ((cast(ulong)d - cast(ulong)s) < n)
     {  // There is overlap with dest being ahead. Use backwards move.
         Dmemmove_back(d, s, n);
@@ -57,7 +93,18 @@ void Dmemmove(T)(ref T[] dst, const ref T[] src) {
     {  // There is no overlap, use memcpy.
         pragma(inline, true);
         Dmemcpy(d, s, n);
-    }
+    }";
+
+
+
+unittest
+{
+    const float[3] a = [1.2, 3.4, 5.8];
+    float[3] b;
+    Dmemmove(b, a);
+    assert(b[0] == 1.2f);
+    assert(b[1] == 3.4f);
+    assert(b[2] == 5.8f);
 }
 
 /* Can we use SIMD?

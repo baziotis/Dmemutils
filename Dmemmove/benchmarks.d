@@ -31,8 +31,6 @@ import std.stdio;
 import core.stdc.string;
 import std.traits;
 
-
-
 static string genTests()
 {
     import std.conv : text;

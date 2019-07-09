@@ -44,7 +44,7 @@ void main(string[] args)
     }
     else if (args[2] == "dmd")
     {
-        compile = "rdmd -O -inline"; 
+        compile = "rdmd -O -inline";
     }
     else
     {
@@ -56,6 +56,9 @@ void main(string[] args)
     {
         compile ~= " -g";
     }
+
+    // Add unittesting
+    compile ~= " -unittest";
 
     // Disable builtins
     if (args[2] == "gdc")

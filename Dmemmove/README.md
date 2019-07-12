@@ -6,10 +6,9 @@ It is a public repository for the work on the `memmove()/memcpy()` replacement.
 
 ## Compile and Run
 
-The `run.d` takes 2 command-line options. One is what suite to run and the other is the compiler of choice (currently
-only DMD and LDC).
+The `run.d` takes 2 command-line options. One is what suite to run and the other is the compiler of choice
 
-`rdmd run tests|benchmarks ldc|dmd`
+`rdmd run tests|benchmarks ldc|dmd|gdc`
 
 ### Run the test suite
 With the option `tests`. This suites verifies that `Dmemmove` works correctly.
@@ -29,6 +28,9 @@ This will compile with `-O3`.
 
 ### DMD
 This will compile with `rdmd` and `-O -inline`.
+
+### GDC
+This will compile with `-O3 -fno-builtin`.
 
 ### Contact Info
 

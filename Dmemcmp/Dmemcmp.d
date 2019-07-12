@@ -35,7 +35,7 @@ if(!isArray!T)
     return Dmemcmp(s1b, s2b);
 }
 
-int Dmemcmp(T)(const T[] s1, const T[] s2) @safe
+int Dmemcmp(T)(const T[] s1, const T[] s2)
 {
     // That cast is always @safe and always can happen (because `byte` has size 1
     // and divides evenly every size).
@@ -231,19 +231,19 @@ unittest
 
 version (D_SIMD)
 {
-    import core.simd : float4;
+    import core.simd : byte16;
     enum useSIMD = true;
 }
 else version (LDC)
 {
     // LDC always supports SIMD (but doesn't ever set D_SIMD) and
     // the back-end uses the most appropriate size for every target.
-    import core.simd : float4;
+    import core.simd : byte16;
     enum useSIMD = true;
 }
 else version (GNU)
 {
-    import core.simd: float4;
+    import core.simd : byte16;
     // GNU does not support SIMD by default.
     version (X86_64)
     {
@@ -254,7 +254,7 @@ else version (GNU)
         enum isX86 = true;
     }
 
-    static if (isX86 && __traits(compiles, float4))
+    static if (isX86 && __traits(compiles, byte16))
     {
         enum useSIMD = true;
     }
@@ -273,7 +273,6 @@ static if (useSIMD)
     /* SIMD implementation
      */
     //int Dmemcmp(ref const byte[] s1, ref const byte[] s2) @safe pure
-    import core.simd : byte16;
     static string assign(string dst, string src)()
     {
         import std.conv : text;

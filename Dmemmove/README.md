@@ -21,7 +21,7 @@ With the option `benchmarks`. This suite benchmarks `Dmemmove` against `memmove(
 Refer to the `run.d` file for more info and `benchmarks.d` to see the benchmark suite code.
 
 ## Compiler choice
-You can choose to compile with LDC or DMD.
+You can choose to compile with LDC, GDC or DMD.
 
 ### LDC
 This will compile with `-O3`.

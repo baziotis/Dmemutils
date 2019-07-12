@@ -11,7 +11,9 @@ by the C Standard Library.
 
 `Dmemmove` contains the work on the replacement of `memmove()/memcpy()` of the C Standard Library.
 
-You can move in any of the above 2 folders to compile and run a test-suite and a benchmark suite.
+`Dmemcmp` contains the work on the replacement of `memcmp()` of the C Standard Library.
+
+You can move in any of the above 3 folders to compile and run a test-suite and a benchmark suite.
 
 ### Contact Info
 
